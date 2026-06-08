@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Dark Labyrinth</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Courier New', Courier, monospace;
+            user-select: none;
+        }
+        
+        #game-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* 遊戲初始畫面 */
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 10;
+            cursor: pointer;
+        }
+
+        #start-screen h1 {
+            font-size: 4rem;
+            color: #880000;
+            text-shadow: 2px 2px 10px #ff0000;
+            margin-bottom: 10px;
+        }
+
+        #start-screen p {
+            font-size: 1.2rem;
+            text-align: center;
+            line-height: 1.5;
+            max-width: 600px;
+        }
+
+        #start-screen .blink {
+            animation: blinker 1.5s linear infinite;
+            margin-top: 30px;
+            font-size: 1.5rem;
+            color: #ccc;
+        }
+
+        @keyframes blinker {
+            50% { opacity: 0; }
+        }
+
+        /* 準心 */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 10px;
+            height: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        /* HUD 介面 */
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            z-index: 5;
+            pointer-events: none;
+            font-size: 1.2rem;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        .bar-container {
+            width: 200px;
+            height: 20px;
+            background-color: rgba(50, 50, 50, 0.5);
+            border: 2px solid #fff;
+            margin-bottom: 10px;
+        }
+
+        #stamina-bar {
+            width: 100%;
+            height: 100%;
+            background-color: #00aaff;
+            transition: width 0.1s;
+        }
+
+        #health-bar {
+            width: 100%;
+            height: 100%;
+            background-color: #ff0000;
+            transition: width 0.1s;
+        }
+
+        #info-hud {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            z-index: 5;
+            pointer-events: none;
+            text-align: right;
+            font-size: 1.5rem;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        /* 結局畫面 */
+        #end-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.95);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 20;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+</head>
+<body>
+
+    <div id="game-container"></div>
+    <div id="crosshair"></div>
+
+    <div id="start-screen">
+        <h1>The Dark Labyrinth</h1>
+        <p>Find 3 keys in the dead ends to unlock the exit (Red Cube).</p>
+        <p>Beware: The toxic gas releases in 60 seconds.</p>
+        <p>Click to start game, WASD to move, Shift to sprint, Mouse to look.</p>
+        <div class="blink">CLICK TO ENTER</div>
+    </div>
+
+    <div id="hud">
+        <div>Stamina</div>
+        <div class="bar-container"><div id="stamina-bar"></div></div>
+        <div>Health</div>
+        <div class="bar-container"><div id="health-bar"></div></div>
+    </div>
+
+    <div id="info-hud">
+        <div id="timer-display">Time: 60s</div>
+        <div id="keys-display">Keys: 0 / 3</div>
+        <div id="msg-display" style="color:#ffcc00; font-size:1.2rem; margin-top:10px;"></div>
+    </div>
+
+    <div id="end-screen">
+        <h1 id="end-title">Game Over</h1>
+        <p id="end-desc"></p>
+        <button onclick="location.reload()" style="padding: 10px 20px; font-size: 1.2rem; margin-top: 20px; cursor: pointer;">Play Again</button>
+    </div>
+
+<script>
+    // === 遊戲核心變數 ===
+    let camera, scene, renderer, controls;
+    let mapSize = 15;
+    let blockSize = 10;
+    let mazeGrid = [];
+    let keysCollected = 0;
+    const totalKeys = 3;
+    let keyObjects = [];
+    let exitObject = null;
+    let exitUnlocked = false;
+    let isGameOver = false;
+
+    // === 玩家狀態變數 ===
+    let moveForward = false;
+    let moveBackward = false;
+    let moveLeft = false;
+    let moveRight = false;
+    let isSprinting = false;
+    
+    let stamina = 100;
+    let health = 100;
+    let timeLeft = 60;
+    let gasActive = false;
+
+    let velocity = new THREE.Vector3();
+    let direction = new THREE.Vector3();
+    let prevTime = performance.now();
+
+    // 手電筒
+    let flashLight;
+
+    init();
+    animate();
+
+    function init() {
+        const container = document.getElementById('game-container');
+
+        // 1. 初始化場景與攝影機
+        scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.08); // 濃厚黑霧
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.y = 5; // 玩家身高
+
+        // 2. 初始化手電筒 (SpotLight 綁定在攝影機上)
+        flashLight = new THREE.SpotLight(0xffffff, 1, 50, Math.PI / 4, 0.5, 1);
+        flashLight.position.set(0, 0, 0);
+        flashLight.target.position.set(0, 0, -1);
+        camera.add(flashLight);
+        camera.add(flashLight.target);
+        scene.add(camera);
+
+        // 3. 渲染器
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        // 4. 控制器 (第一人稱游標鎖定)
+        controls = new THREE.PointerLockControls(camera, document.body);
+        
+        const startScreen = document.getElementById('start-screen');
+        startScreen.addEventListener('click', function () {
+            controls.lock();
+        });
+
+        controls.addEventListener('lock', function () {
+            startScreen.style.display = 'none';
+            prevTime = performance.now();
+        });
+
+        controls.addEventListener('unlock', function () {
+            if(!isGameOver) startScreen.style.display = 'flex';
+        });
+
+        // 5. 動態生成材質
+        const wallMaterial = new THREE.MeshStandardMaterial({ 
+            map: generateNoiseTexture(), 
+            roughness: 0.9 
+        });
+        const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 1 });
+        const ceilingMaterial = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 1 });
+
+        // 6. 迷宮生成與建構
+        generateMazeData();
+        buildMaze3D(wallMaterial, floorMaterial, ceilingMaterial);
+
+        // 7. 綁定按鍵事件
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+        window.addEventListener('resize', onWindowResize);
+
+        // 8. 啟動計時器
+        setInterval(updateTimer, 1000);
+    }
+
+    // === 動態生成雜訊紋理 ===
+    function generateNoiseTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(256, 256);
+        for (let i = 0; i < imgData.data.length; i += 4) {
+            // 黑白相間或雜訊感
+            const val = Math.random() > 0.5 ? 20 : 60;
+            imgData.data[i] = val;     // R
+            imgData.data[i+1] = val;   // G
+            imgData.data[i+2] = val;   // B
+            imgData.data[i+3] = 255;   // A
+        }
+        ctx.putImageData(imgData, 0, 0);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(2, 2);
+        return texture;
+    }
+
+    // === DFS 迷宮生成演算法 (產生 15x15 的封閉迷宮) ===
+    function generateMazeData() {
+        // 初始化全為牆 (1)
+        for (let i = 0; i < mapSize; i++) {
+            mazeGrid[i] = [];
+            for (let j = 0; j < mapSize; j++) {
+                mazeGrid[i][j] = 1;
+            }
+        }
+
+        // 使用 Recursive Backtracker 演算法
+        function carve(r, c) {
+            mazeGrid[r][c] = 0;
+            const dirs = [ [1,0], [-1,0], [0,1], [0,-1] ];
+            dirs.sort(() => Math.random() - 0.5); // 打亂方向
+
+            for (let i = 0; i < dirs.length; i++) {
+                const nr = r + dirs[i][0] * 2;
+                const nc = c + dirs[i][1] * 2;
+                if (nr > 0 && nr < mapSize - 1 && nc > 0 && nc < mapSize - 1 && mazeGrid[nr][nc] === 1) {
+                    mazeGrid[r + dirs[i][0]][c + dirs[i][1]] = 0; // 打通中間的牆
+                    carve(nr, nc);
+                }
+            }
+        }
+
+        // 從 (1,1) 開始生成
+        carve(1, 1);
+    }
+
+    // ===
